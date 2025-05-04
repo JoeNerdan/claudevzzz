@@ -109,7 +109,7 @@ app.post('/api/launch-agent', (req, res) => {
     git checkout -b fix-issue-${issue.number} </dev/null >> ${workspacePath}/output.log 2>> ${workspacePath}/error.log && 
     echo "✅ Branch created" >> ${workspacePath}/output.log && 
     echo "🔄 Running Claude Code agent..." >> ${workspacePath}/output.log && 
-    CLAUDE_HOME=/data/.claude claude -p --output-format json "$(cat ${workspacePath}/prompt.txt)" </dev/null > ${workspacePath}/claude_output.json 2>> ${workspacePath}/error.log && 
+    claude -p --output-format json "$(cat ${workspacePath}/prompt.txt)" </dev/null > ${workspacePath}/claude_output.json 2>> ${workspacePath}/error.log && 
     echo "✅ Agent process complete" >> ${workspacePath}/output.log`;
 
     // Launch the agent as a separate process
