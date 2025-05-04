@@ -225,22 +225,42 @@ app.get('/api/agents', (req, res) => {
 // API: Get agent logs
 app.get('/api/agent/:workspaceId/logs', (req, res) => {
     const { workspaceId } = req.params;
-    const { type = 'output' } = req.query; // 'output' or 'error'
+    const { type = 'output' } = req.query; // 'output', 'error', or 'claude'
 
     if (!activeAgents[workspaceId]) {
         return res.status(404).json({ error: 'Agent not found' });
     }
 
     const agentInfo = activeAgents[workspaceId];
-    const logFile = type === 'error' ? 'error.log' : 'output.log';
-    const logPath = path.join(agentInfo.workspace, logFile);
+    
+    let logPath;
+    if (type === 'claude') {
+        logPath = path.join(agentInfo.workspace, 'claude_output.json');
+    } else {
+        const logFile = type === 'error' ? 'error.log' : 'output.log';
+        logPath = path.join(agentInfo.workspace, logFile);
+    }
 
     try {
         if (fs.existsSync(logPath)) {
             const logContent = fs.readFileSync(logPath, 'utf8');
+            
+            // Format Claude output for better readability if it's JSON
+            if (type === 'claude' && logContent.trim()) {
+                try {
+                    const claudeData = JSON.parse(logContent);
+                    // Return formatted JSON or pretty-printed if parsing succeeds
+                    res.json({ logs: JSON.stringify(claudeData, null, 2) });
+                    return;
+                } catch (jsonError) {
+                    // If not valid JSON, just return as is
+                    console.log('Error parsing Claude output as JSON:', jsonError);
+                }
+            }
+            
             res.json({ logs: logContent });
         } else {
-            res.status(404).json({ error: 'Log file not found' });
+            res.status(404).json({ error: `Log file not found: ${logPath}` });
         }
     } catch (error) {
         res.status(500).json({ error: `Error reading log file: ${error.message} ` });

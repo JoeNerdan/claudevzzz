@@ -203,6 +203,12 @@ const AgentItem = ({ id, agent }) => {
               >
                 Error Log
               </button>
+              <button 
+                className={`px-3 py-1 text-xs font-medium rounded-t-md ${activeLogType === 'claude' ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-700'}`}
+                onClick={() => viewLogs('claude')}
+              >
+                Claude Code
+              </button>
             </div>
 
             <div className="flex items-center space-x-2">
@@ -252,37 +258,46 @@ const AgentItem = ({ id, agent }) => {
                 )}
                 
                 <pre className="whitespace-pre-wrap leading-relaxed">
-                  {logs.split('\n').map((line, index) => {
-                    // Extract timestamp if present in format [HH:MM:SS]
-                    const timestampMatch = line.match(/\[(\d{2}:\d{2}:\d{2})\]/);
-                    const timestamp = timestampMatch ? timestampMatch[1] : null;
-                    
-                    // Add colors for emojis and status messages
-                    let className = '';
-                    
-                    if (activeLogType === 'error') {
-                      className = 'text-red-300'; // Error logs are reddish
-                    } else {
-                      if (line.includes('✅')) {
-                        className = 'text-green-400';
-                      } else if (line.includes('❌')) {
-                        className = 'text-red-400';
-                      } else if (line.includes('🔄')) {
-                        className = 'text-blue-400';
-                      } else if (line.includes('📋')) {
-                        className = 'text-yellow-400 font-bold';
-                      }
-                    }
-                    
-                    return (
-                      <div key={index} className={className}>
-                        {timestamp && (
-                          <span className="text-gray-500 mr-2">{timestamp}</span>
-                        )}
-                        {line.replace(/\[\d{2}:\d{2}:\d{2}\]\s*/, '')}
-                      </div>
-                    );
-                  })}
+                  {activeLogType === 'claude' 
+                    ? logs.split('\n').map((line, index) => {
+                        // Format JSON keys with different color for Claude output
+                        const formattedLine = line.replace(/"([^"]+)":/g, '<span class="text-yellow-300">"$1":</span>');
+                        return (
+                          <div key={index} className="text-purple-300" dangerouslySetInnerHTML={{ __html: formattedLine }} />
+                        );
+                      })
+                    : logs.split('\n').map((line, index) => {
+                        // Extract timestamp if present in format [HH:MM:SS]
+                        const timestampMatch = line.match(/\[(\d{2}:\d{2}:\d{2})\]/);
+                        const timestamp = timestampMatch ? timestampMatch[1] : null;
+                        
+                        // Add colors for emojis and status messages
+                        let className = '';
+                        
+                        if (activeLogType === 'error') {
+                          className = 'text-red-300'; // Error logs are reddish
+                        } else {
+                          if (line.includes('✅')) {
+                            className = 'text-green-400';
+                          } else if (line.includes('❌')) {
+                            className = 'text-red-400';
+                          } else if (line.includes('🔄')) {
+                            className = 'text-blue-400';
+                          } else if (line.includes('📋')) {
+                            className = 'text-yellow-400 font-bold';
+                          }
+                        }
+                        
+                        return (
+                          <div key={index} className={className}>
+                            {timestamp && (
+                              <span className="text-gray-500 mr-2">{timestamp}</span>
+                            )}
+                            {line.replace(/\[\d{2}:\d{2}:\d{2}\]\s*/, '')}
+                          </div>
+                        );
+                      })
+                  }
                 </pre>
               </div>
             ) : (
