@@ -87,6 +87,23 @@ else
     echo "Installing dependencies in mounted volume..."
     npm install
     
+    # Ensure GitHub credentials are properly linked even in dev mode with volume mount
+    echo "Ensuring GitHub credentials are accessible in dev mode..."
+    if [ -d "/data/.config/gh" ]; then
+        # Copy GitHub config directly into container to avoid symlink issues with volume mounts
+        mkdir -p "$HOME/.config"
+        cp -rf /data/.config/gh "$HOME/.config/"
+        chmod -R 700 "$HOME/.config/gh"
+        echo "✅ GitHub credentials copied to container home directory"
+        
+        # Verify credentials are working
+        if gh auth status &>/dev/null; then
+            echo "✅ GitHub CLI auth test successful"
+        else
+            echo "⚠️ GitHub CLI auth test failed - credentials may not be properly configured"
+        fi
+    fi
+    
     # Run Vite in development mode in the background
     echo "Starting Vite development server..."
     npm run client:dev &

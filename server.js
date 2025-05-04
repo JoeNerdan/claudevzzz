@@ -10,40 +10,23 @@ const port = 3000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Setup to handle both development and production environments
-if (process.env.NODE_ENV === 'development') {
-    // In development mode, proxy non-API requests to the Vite dev server
-    console.log('Development mode: Proxying front-end requests to Vite dev server');
-    app.use('/', 
-        createProxyMiddleware({
-            target: 'http://localhost:5173',
-            changeOrigin: true,
-            // Don't proxy API requests, those will be handled by Express
-            filter: (pathname) => !pathname.startsWith('/api')
-        })
-    );
-} else {
-    // In production mode, serve static files from the public directory
-    console.log('Production mode: Serving static files');
-    
-    // First serve React app files from the dist directory
-    app.use(express.static(path.join(__dirname, 'public/dist')));
-    
-    // Then serve any other static files from the public directory
-    app.use(express.static('public'));
-}
-
-// Track active agents
-const activeAgents = {};
+// Define API routes BEFORE proxy setup to ensure they're handled by Express
 
 // API: List user's GitHub repositories
 app.get('/api/repos', (req, res) => {
     exec('gh repo list --json name,nameWithOwner,url,description,isPrivate,stargazerCount --limit 100', (error, stdout, stderr) => {
         if (error) {
+            console.error('Error fetching repos:', error, stderr);
             return res.status(500).json({ error: stderr || error.message });
         }
         
-        res.json(JSON.parse(stdout));
+        try {
+            const data = JSON.parse(stdout);
+            res.json(data);
+        } catch (parseError) {
+            console.error('Error parsing repo data:', parseError, stdout);
+            res.status(500).json({ error: 'Failed to parse repository data', details: stdout });
+        }
     });
 });
 
@@ -218,6 +201,38 @@ app.get('/api/agent/:workspaceId/logs', (req, res) => {
         res.status(500).json({ error: `Error reading log file: ${error.message}` });
     }
 });
+
+// Setup to handle both development and production environments
+if (process.env.NODE_ENV === 'development') {
+    // In development mode, proxy non-API requests to the Vite dev server
+    console.log('Development mode: Proxying front-end requests to Vite dev server');
+    app.use('/', 
+        createProxyMiddleware({
+            target: 'http://localhost:5173',
+            changeOrigin: true,
+            // Don't proxy API requests, those will be handled by Express
+            filter: (pathname) => !pathname.startsWith('/api'),
+            // Log errors for easier debugging
+            onError: (err, req, res) => {
+                console.error('Proxy error:', err);
+                res.status(500).send('Proxy error: ' + err.message);
+            },
+            logLevel: 'debug'
+        })
+    );
+} else {
+    // In production mode, serve static files from the public directory
+    console.log('Production mode: Serving static files');
+    
+    // First serve React app files from the dist directory
+    app.use(express.static(path.join(__dirname, 'public/dist')));
+    
+    // Then serve any other static files from the public directory
+    app.use(express.static('public'));
+}
+
+// Track active agents
+const activeAgents = {};
 
 // Serve React app for all other routes (SPA routing)
 app.get('*', (req, res, next) => {
