@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import RepoList from './RepoList';
 import IssueList from './IssueList';
 import IssueDetails from './IssueDetails';
@@ -91,17 +91,59 @@ const Dashboard = () => {
 const AgentItem = ({ id, agent }) => {
   const [activeLogType, setActiveLogType] = useState('output');
   const [logs, setLogs] = useState('');
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const logContainerRef = useRef(null);
+  const [autoScroll, setAutoScroll] = useState(true);
 
-  const viewLogs = async (type) => {
+  // Function to fetch logs
+  const fetchLogs = async (type) => {
     try {
       const response = await fetch(`/api/agent/${id}/logs?type=${type}`);
       const data = await response.json();
       setLogs(data.logs || 'No logs available');
-      setActiveLogType(type);
+      
+      // Auto scroll to bottom if enabled
+      if (autoScroll && logContainerRef.current) {
+        setTimeout(() => {
+          const container = logContainerRef.current;
+          container.scrollTop = container.scrollHeight;
+        }, 100);
+      }
     } catch (error) {
       console.error('Error fetching logs:', error);
       setLogs('Error loading logs');
     }
+  };
+  
+  // Handle view logs button click
+  const viewLogs = (type) => {
+    setActiveLogType(type);
+    fetchLogs(type);
+  };
+  
+  // Auto-refresh logs every 2 seconds
+  useEffect(() => {
+    let interval;
+    
+    if (autoRefresh && agent.status === 'running') {
+      interval = setInterval(() => {
+        fetchLogs(activeLogType);
+      }, 2000);
+    }
+    
+    // Initial load of logs
+    fetchLogs(activeLogType);
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [id, activeLogType, autoRefresh, agent.status]);
+  
+  // Handle manual scrolling to disable auto-scroll
+  const handleScroll = (e) => {
+    const container = e.target;
+    const isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 50;
+    setAutoScroll(isAtBottom);
   };
 
   let statusColor = 'bg-blue-100 text-blue-800';
@@ -147,28 +189,161 @@ const AgentItem = ({ id, agent }) => {
         </div>
         
         <div>
-          <div className="flex space-x-2 mb-2">
-            <button 
-              className={`px-3 py-1 text-xs font-medium rounded-t-md ${activeLogType === 'output' ? 'bg-gray-800 text-white' : 'bg-gray-200 text-gray-700'}`}
-              onClick={() => viewLogs('output')}
-            >
-              Output Log
-            </button>
-            <button 
-              className={`px-3 py-1 text-xs font-medium rounded-t-md ${activeLogType === 'error' ? 'bg-gray-800 text-white' : 'bg-gray-200 text-gray-700'}`}
-              onClick={() => viewLogs('error')}
-            >
-              Error Log
-            </button>
+          <div className="flex justify-between mb-2">
+            <div className="flex space-x-2">
+              <button 
+                className={`px-3 py-1 text-xs font-medium rounded-t-md ${activeLogType === 'output' ? 'bg-gray-800 text-white' : 'bg-gray-200 text-gray-700'}`}
+                onClick={() => viewLogs('output')}
+              >
+                Output Log
+              </button>
+              <button 
+                className={`px-3 py-1 text-xs font-medium rounded-t-md ${activeLogType === 'error' ? 'bg-gray-800 text-white' : 'bg-gray-200 text-gray-700'}`}
+                onClick={() => viewLogs('error')}
+              >
+                Error Log
+              </button>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => fetchLogs(activeLogType)}
+                className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded-md"
+                title="Refresh logs now"
+              >
+                ↻
+              </button>
+              <label className="flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoRefresh}
+                  onChange={() => setAutoRefresh(!autoRefresh)}
+                  className="form-checkbox h-3 w-3 text-blue-600"
+                />
+                <span className="ml-1 text-xs text-gray-700 dark:text-gray-300">
+                  Auto-refresh
+                </span>
+              </label>
+              <label className="flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoScroll}
+                  onChange={() => setAutoScroll(!autoScroll)}
+                  className="form-checkbox h-3 w-3 text-green-600"
+                />
+                <span className="ml-1 text-xs text-gray-700 dark:text-gray-300">
+                  Auto-scroll
+                </span>
+              </label>
+            </div>
           </div>
           
-          <div className="bg-gray-900 text-gray-300 p-3 rounded-md text-xs font-mono h-32 overflow-y-auto">
+          <div
+            ref={logContainerRef}
+            className="bg-gray-900 text-gray-300 p-3 rounded-md text-sm font-mono h-64 overflow-y-auto"
+            onScroll={handleScroll}
+          >
             {logs ? (
-              <pre className="whitespace-pre-wrap">{logs}</pre>
+              <div className="relative">
+                {autoRefresh && agent.status === 'running' && (
+                  <div className="absolute top-0 right-0 bg-blue-600 text-white text-xs px-2 py-1 rounded-bl-md">
+                    Auto-refreshing...
+                  </div>
+                )}
+                
+                <pre className="whitespace-pre-wrap leading-relaxed">
+                  {logs.split('\n').map((line, index) => {
+                    // Extract timestamp if present in format [HH:MM:SS]
+                    const timestampMatch = line.match(/\[(\d{2}:\d{2}:\d{2})\]/);
+                    const timestamp = timestampMatch ? timestampMatch[1] : null;
+                    
+                    // Add colors for emojis and status messages
+                    let className = '';
+                    
+                    if (activeLogType === 'error') {
+                      className = 'text-red-300'; // Error logs are reddish
+                    } else {
+                      if (line.includes('✅')) {
+                        className = 'text-green-400';
+                      } else if (line.includes('❌')) {
+                        className = 'text-red-400';
+                      } else if (line.includes('🔄')) {
+                        className = 'text-blue-400';
+                      } else if (line.includes('📋')) {
+                        className = 'text-yellow-400 font-bold';
+                      }
+                    }
+                    
+                    return (
+                      <div key={index} className={className}>
+                        {timestamp && (
+                          <span className="text-gray-500 mr-2">{timestamp}</span>
+                        )}
+                        {line.replace(/\[\d{2}:\d{2}:\d{2}\]\s*/, '')}
+                      </div>
+                    );
+                  })}
+                </pre>
+              </div>
             ) : (
               <em>Click one of the log options above to view logs</em>
             )}
           </div>
+          
+          {agent.debugLogs && (
+            <div className="mt-2">
+              <div className="flex flex-wrap gap-2 mb-2">
+                {agent.debugLogs["debug_log"] && (
+                  <button 
+                    className="px-3 py-1 text-xs font-medium rounded-md bg-purple-100 text-purple-700"
+                    onClick={() => setLogs(agent.debugLogs.debug_log)}
+                  >
+                    Debug Log
+                  </button>
+                )}
+                {agent.debugLogs["env_log"] && (
+                  <button 
+                    className="px-3 py-1 text-xs font-medium rounded-md bg-yellow-100 text-yellow-700"
+                    onClick={() => setLogs(agent.debugLogs.env_log)}
+                  >
+                    Env Log
+                  </button>
+                )}
+                {agent.debugLogs["auth_log"] && (
+                  <button 
+                    className="px-3 py-1 text-xs font-medium rounded-md bg-blue-100 text-blue-700"
+                    onClick={() => setLogs(agent.debugLogs.auth_log)}
+                  >
+                    Auth Log
+                  </button>
+                )}
+                {agent.debugLogs["output_log"] && (
+                  <button 
+                    className="px-3 py-1 text-xs font-medium rounded-md bg-green-100 text-green-700"
+                    onClick={() => setLogs(agent.debugLogs.output_log)}
+                  >
+                    Full Output
+                  </button>
+                )}
+                {agent.debugLogs["claude_test_json"] && (
+                  <button 
+                    className="px-3 py-1 text-xs font-medium rounded-md bg-indigo-100 text-indigo-700"
+                    onClick={() => setLogs(agent.debugLogs.claude_test_json)}
+                  >
+                    Claude Test
+                  </button>
+                )}
+                {agent.debugLogs["claude_output_json"] && (
+                  <button 
+                    className="px-3 py-1 text-xs font-medium rounded-md bg-pink-100 text-pink-700"
+                    onClick={() => setLogs(agent.debugLogs.claude_output_json)}
+                  >
+                    Claude Output
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

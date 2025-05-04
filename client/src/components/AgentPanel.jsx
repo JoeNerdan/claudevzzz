@@ -1,42 +1,12 @@
 import React, { useState } from 'react';
 
 const AgentPanel = ({ repo, issue, onAgentLaunch }) => {
-  const [configType, setConfigType] = useState('basic');
-  const [config, setConfig] = useState('');
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [prompt, setPrompt] = useState(
+    `Fix issue #${issue?.number}. Use gh to get the information. Fix the issue and open a PR. If you cannot fix it, add a comment. NEVER stop working without either a PR or a comment.`
+  );
   const [isLaunching, setIsLaunching] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
-
-  const generateConfig = async () => {
-    setIsGenerating(true);
-    setError(null);
-    
-    try {
-      const response = await fetch('/api/generate-config', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          issue,
-          configType
-        })
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to generate configuration');
-      }
-      
-      const data = await response.json();
-      setConfig(data.config);
-    } catch (error) {
-      console.error('Error generating config:', error);
-      setError('Error generating configuration');
-    } finally {
-      setIsGenerating(false);
-    }
-  };
 
   const launchAgent = async () => {
     setIsLaunching(true);
@@ -44,13 +14,6 @@ const AgentPanel = ({ repo, issue, onAgentLaunch }) => {
     setSuccess(null);
     
     try {
-      let configObj;
-      try {
-        configObj = JSON.parse(config);
-      } catch (parseError) {
-        throw new Error('Invalid JSON configuration');
-      }
-      
       const response = await fetch('/api/launch-agent', {
         method: 'POST',
         headers: {
@@ -59,7 +22,7 @@ const AgentPanel = ({ repo, issue, onAgentLaunch }) => {
         body: JSON.stringify({
           repo,
           issue,
-          config: configObj,
+          prompt,
           agentType: 'claude-code'
         })
       });
@@ -85,7 +48,7 @@ const AgentPanel = ({ repo, issue, onAgentLaunch }) => {
 
   return (
     <div className="card">
-      <h2 className="text-xl font-semibold mb-4">Agent Configuration</h2>
+      <h2 className="text-xl font-semibold mb-4">Agent Prompt</h2>
       
       {error && (
         <div className="bg-red-100 text-red-700 p-3 rounded-md mb-4 text-sm">
@@ -101,71 +64,20 @@ const AgentPanel = ({ repo, issue, onAgentLaunch }) => {
       
       <div className="mb-4">
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-          Configuration Type
-        </label>
-        <div className="flex gap-4">
-          <label className="inline-flex items-center">
-            <input
-              type="radio"
-              name="configType"
-              value="basic"
-              checked={configType === 'basic'}
-              onChange={() => setConfigType('basic')}
-              className="h-4 w-4 text-primary-600 focus:ring-primary-500"
-            />
-            <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">Basic</span>
-          </label>
-          <label className="inline-flex items-center">
-            <input
-              type="radio"
-              name="configType"
-              value="detailed"
-              checked={configType === 'detailed'}
-              onChange={() => setConfigType('detailed')}
-              className="h-4 w-4 text-primary-600 focus:ring-primary-500"
-            />
-            <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">Detailed</span>
-          </label>
-          <label className="inline-flex items-center">
-            <input
-              type="radio"
-              name="configType"
-              value="expert"
-              checked={configType === 'expert'}
-              onChange={() => setConfigType('expert')}
-              className="h-4 w-4 text-primary-600 focus:ring-primary-500"
-            />
-            <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">Expert</span>
-          </label>
-        </div>
-      </div>
-      
-      <div className="flex gap-2 mb-4">
-        <button
-          onClick={generateConfig}
-          disabled={isGenerating}
-          className="btn-primary"
-        >
-          {isGenerating ? 'Generating...' : 'Generate Config'}
-        </button>
-      </div>
-      
-      <div className="mb-4">
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-          Configuration
+          Agent Prompt
         </label>
         <textarea
-          value={config}
-          onChange={(e) => setConfig(e.target.value)}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
           className="w-full h-64 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-400 font-mono text-sm dark:bg-gray-700 dark:border-gray-600"
-          placeholder="Configuration will appear here after generation"
+          placeholder="Enter the prompt for Claude agent"
         />
       </div>
       
       <div className="flex justify-end">
         <button
           onClick={launchAgent}
-          disabled={!config || isLaunching}
+          disabled={!prompt || isLaunching}
           className="btn-secondary"
         >
           {isLaunching ? 'Launching...' : 'Launch Agent'}

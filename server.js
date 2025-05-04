@@ -19,7 +19,7 @@ app.get('/api/repos', (req, res) => {
             console.error('Error fetching repos:', error, stderr);
             return res.status(500).json({ error: stderr || error.message });
         }
-        
+
         try {
             const data = JSON.parse(stdout);
             res.json(data);
@@ -33,16 +33,16 @@ app.get('/api/repos', (req, res) => {
 // API: List GitHub issues
 app.get('/api/issues', (req, res) => {
     const { repo } = req.query;
-    
+
     if (!repo) {
         return res.status(400).json({ error: 'Repository is required' });
     }
-    
+
     exec(`gh issue list --repo ${repo} --json number,title,state,labels`, (error, stdout, stderr) => {
         if (error) {
             return res.status(500).json({ error: stderr || error.message });
         }
-        
+
         res.json(JSON.parse(stdout));
     });
 });
@@ -51,69 +51,75 @@ app.get('/api/issues', (req, res) => {
 app.get('/api/issues/:number', (req, res) => {
     const { repo } = req.query;
     const { number } = req.params;
-    
+
     if (!repo) {
         return res.status(400).json({ error: 'Repository is required' });
     }
-    
+
     exec(`gh issue view ${number} --repo ${repo} --json number,title,body,labels,assignees`, (error, stdout, stderr) => {
         if (error) {
             return res.status(500).json({ error: stderr || error.message });
         }
-        
+
         res.json(JSON.parse(stdout));
     });
 });
 
-// API: Generate agent configuration with Claude
-app.post('/api/generate-config', (req, res) => {
-    const { issue, configType } = req.body;
-    
-    if (!issue || !configType) {
-        return res.status(400).json({ error: 'Issue and config type are required' });
-    }
-    
-    // Build prompt for Claude to generate config
-    const prompt = `Generate a ${configType} configuration for GitHub issue #${issue.number}: ${issue.title}
-Issue description: ${issue.body}
-Please create a configuration that would help an AI agent understand and fix this issue.`;
-    
-    exec(`claude "${prompt}"`, (error, stdout, stderr) => {
-        if (error) {
-            return res.status(500).json({ error: stderr || error.message });
-        }
-        
-        res.json({ config: stdout });
-    });
-});
+// API endpoint for direct agent prompt functionality is no longer needed
+// The prompt is now provided directly from the client
 
 // API: Launch an agent for an issue
 app.post('/api/launch-agent', (req, res) => {
-    const { repo, issue, config, agentType } = req.body;
-    
-    if (!repo || !issue || !config || !agentType) {
-        return res.status(400).json({ error: 'Repository, issue, config, and agent type are required' });
+    const { repo, issue, prompt, agentType } = req.body;
+
+    if (!repo || !issue || !prompt || !agentType) {
+        return res.status(400).json({ error: 'Repository, issue, prompt, and agent type are required' });
     }
-    
+
     // Create workspace for the agent
     const workspaceId = `issue-${issue.number}-${Date.now()}`;
     const workspacePath = path.join('/data/workspaces', workspaceId);
-    
+
+    console.log(`[DEBUG] Creating workspace at: ${workspacePath}`);
     fs.mkdirSync(workspacePath, { recursive: true });
-    fs.writeFileSync(path.join(workspacePath, 'config.json'), JSON.stringify(config));
+    fs.writeFileSync(path.join(workspacePath, 'prompt.txt'), prompt);
     fs.writeFileSync(path.join(workspacePath, 'issue.json'), JSON.stringify(issue));
     
-    // Command to run the Claude Code agent
-    const agentCommand = `cd ${workspacePath} && gh repo clone ${repo} . && git checkout -b fix-issue-${issue.number} && claude code --config ./config.json`;
-    
+    // Quick auth check with minimal output
+    console.log('Verifying tool access...');
+    try {
+        const claudePath = require('child_process').execSync('which claude 2>/dev/null || echo "not found"', { timeout: 1000 }).toString().trim();
+        if (claudePath !== "not found") {
+            console.log('✅ Claude CLI detected');
+        } else {
+            console.log('❌ Claude CLI not found in PATH');
+        }
+    } catch (error) {
+        console.log('❌ Error checking Claude CLI');
+    }
+
+    // Simplified agent command with minimal debug output
+    const agentCommand = `cd ${workspacePath} && mkdir -p repo && 
+    echo "📋 [$(date +%H:%M:%S)] Starting agent for issue #${issue.number}" >> ${workspacePath}/output.log && 
+    echo "🔄 Cloning repository ${repo}..." >> ${workspacePath}/output.log && 
+    gh repo clone ${repo} repo </dev/null >> ${workspacePath}/output.log 2>> ${workspacePath}/error.log && 
+    cd repo && 
+    echo "✅ Repository cloned" >> ${workspacePath}/output.log && 
+    echo "🔄 Creating branch fix-issue-${issue.number}..." >> ${workspacePath}/output.log && 
+    git checkout -b fix-issue-${issue.number} </dev/null >> ${workspacePath}/output.log 2>> ${workspacePath}/error.log && 
+    echo "✅ Branch created" >> ${workspacePath}/output.log && 
+    echo "🔄 Running Claude Code agent..." >> ${workspacePath}/output.log && 
+    CLAUDE_HOME=/data/.claude claude -p --output-format json "$(cat ${workspacePath}/prompt.txt)" </dev/null > ${workspacePath}/claude_output.json 2>> ${workspacePath}/error.log && 
+    echo "✅ Agent process complete" >> ${workspacePath}/output.log`;
+
     // Launch the agent as a separate process
     const agentProcess = spawn('bash', ['-c', agentCommand], {
         detached: true,
-        stdio: ['ignore', 
-                fs.openSync(path.join(workspacePath, 'output.log'), 'w'),
-                fs.openSync(path.join(workspacePath, 'error.log'), 'w')]
+        stdio: ['ignore',
+            fs.openSync(path.join(workspacePath, 'output.log'), 'w'),
+            fs.openSync(path.join(workspacePath, 'error.log'), 'w')]
     });
-    
+
     // Store the agent info
     activeAgents[workspaceId] = {
         pid: agentProcess.pid,
@@ -122,11 +128,11 @@ app.post('/api/launch-agent', (req, res) => {
         status: 'running',
         workspace: workspacePath
     };
-    
+
     // Don't wait for the process to finish
     agentProcess.unref();
-    
-    res.json({ 
+
+    res.json({
         workspaceId,
         message: `Agent launched for issue #${issue.number}`
     });
@@ -135,13 +141,13 @@ app.post('/api/launch-agent', (req, res) => {
 // API: Check agent status
 app.get('/api/agent/:workspaceId', (req, res) => {
     const { workspaceId } = req.params;
-    
+
     if (!activeAgents[workspaceId]) {
         return res.status(404).json({ error: 'Agent not found' });
     }
-    
+
     const agentInfo = activeAgents[workspaceId];
-    
+
     // Check if the process is still running
     try {
         process.kill(agentInfo.pid, 0);
@@ -149,16 +155,17 @@ app.get('/api/agent/:workspaceId', (req, res) => {
     } catch (e) {
         // Process no longer exists, agent has finished
         agentInfo.status = 'completed';
-        
+
         // Check for pull request creation in output logs
         const outputLog = fs.readFileSync(path.join(agentInfo.workspace, 'output.log'), 'utf8');
+        
         if (outputLog.includes('Pull request created')) {
             const prMatch = outputLog.match(/Pull request created: (https:\/\/github\.com\/.*\/pull\/\d+)/);
             if (prMatch) {
                 agentInfo.pullRequestUrl = prMatch[1];
             }
         }
-        
+
         // Check for roadblocks
         if (outputLog.includes('ROADBLOCK:')) {
             agentInfo.status = 'roadblock';
@@ -167,8 +174,46 @@ app.get('/api/agent/:workspaceId', (req, res) => {
                 agentInfo.roadblock = roadblockMatch[1];
             }
         }
+        
+        // Check for authentication errors
+        if (outputLog.includes('Invalid API key') || outputLog.includes('Please run /login')) {
+            agentInfo.status = 'auth_error';
+            agentInfo.errorDetails = 'Claude authentication failed. Check API key or run claude login.';
+        }
+        
+        // Check error log for more details
+        try {
+            const errorLog = fs.readFileSync(path.join(agentInfo.workspace, 'error.log'), 'utf8');
+            agentInfo.errorLog = errorLog;
+        } catch (readError) {
+            // Silently handle error log reading failures
+        }
+        
+        // Read additional debug files if they exist
+        try {
+            const debugFiles = ['env.log', 'claude_output.json'];
+            agentInfo.debugLogs = {};
+            
+            debugFiles.forEach(file => {
+                const filePath = path.join(agentInfo.workspace, file);
+                if (fs.existsSync(filePath)) {
+                    const content = fs.readFileSync(filePath, 'utf8');
+                    // Create a more user-friendly key for the frontend
+                    const keyName = file.replace('.', '_');
+                    agentInfo.debugLogs[keyName] = content;
+                }
+            });
+            
+            // Also add the full output.log for reference
+            const outputLogPath = path.join(agentInfo.workspace, 'output.log');
+            if (fs.existsSync(outputLogPath)) {
+                agentInfo.debugLogs['output_log'] = fs.readFileSync(outputLogPath, 'utf8');
+            }
+        } catch (debugError) {
+            // Silently handle debug file reading failures
+        }
     }
-    
+
     res.json(agentInfo);
 });
 
@@ -181,15 +226,15 @@ app.get('/api/agents', (req, res) => {
 app.get('/api/agent/:workspaceId/logs', (req, res) => {
     const { workspaceId } = req.params;
     const { type = 'output' } = req.query; // 'output' or 'error'
-    
+
     if (!activeAgents[workspaceId]) {
         return res.status(404).json({ error: 'Agent not found' });
     }
-    
+
     const agentInfo = activeAgents[workspaceId];
     const logFile = type === 'error' ? 'error.log' : 'output.log';
     const logPath = path.join(agentInfo.workspace, logFile);
-    
+
     try {
         if (fs.existsSync(logPath)) {
             const logContent = fs.readFileSync(logPath, 'utf8');
@@ -198,15 +243,15 @@ app.get('/api/agent/:workspaceId/logs', (req, res) => {
             res.status(404).json({ error: 'Log file not found' });
         }
     } catch (error) {
-        res.status(500).json({ error: `Error reading log file: ${error.message}` });
+        res.status(500).json({ error: `Error reading log file: ${error.message} ` });
     }
 });
 
 // Setup to handle both development and production environments
 if (process.env.NODE_ENV === 'development') {
     // In development mode, proxy non-API requests to the Vite dev server
-    console.log('Development mode: Proxying front-end requests to Vite dev server');
-    app.use('/', 
+    console.log('🔄 Proxying frontend requests to Vite dev server');
+    app.use('/',
         createProxyMiddleware({
             target: 'http://localhost:5173',
             changeOrigin: true,
@@ -214,19 +259,19 @@ if (process.env.NODE_ENV === 'development') {
             filter: (pathname) => !pathname.startsWith('/api'),
             // Log errors for easier debugging
             onError: (err, req, res) => {
-                console.error('Proxy error:', err);
+                console.error('❌ Proxy error:', err.message);
                 res.status(500).send('Proxy error: ' + err.message);
             },
-            logLevel: 'debug'
+            logLevel: 'error'
         })
     );
 } else {
     // In production mode, serve static files from the public directory
-    console.log('Production mode: Serving static files');
-    
+    console.log('📁 Serving static files from public directory');
+
     // First serve React app files from the dist directory
     app.use(express.static(path.join(__dirname, 'public/dist')));
-    
+
     // Then serve any other static files from the public directory
     app.use(express.static('public'));
 }
@@ -238,7 +283,7 @@ const activeAgents = {};
 app.get('*', (req, res, next) => {
     // Skip API routes
     if (req.path.startsWith('/api')) return next();
-    
+
     // In production mode, serve the React app for all non-API routes
     if (process.env.NODE_ENV !== 'development') {
         const indexPath = path.join(__dirname, 'public/dist/index.html');
@@ -256,6 +301,8 @@ app.get('*', (req, res, next) => {
 
 // Start the server
 app.listen(port, '0.0.0.0', () => {
-    console.log(`Server running at http://0.0.0.0:${port}`);
-    console.log(`Development mode: ${process.env.NODE_ENV === 'development'}`);
+    console.log(`✅ Server running at http://0.0.0.0:${port}`);
+    if (process.env.NODE_ENV === 'development') {
+        console.log('🔧 Running in development mode');
+    }
 });
