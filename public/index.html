@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claudevzzz: GitHub Issue Assistant</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .panel {
+            border: 1px solid #ccc;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .issue-list {
+            height: 400px;
+            overflow-y: auto;
+        }
+        .issue-item {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+        }
+        .issue-item:hover {
+            background-color: #f5f5f5;
+        }
+        .issue-details {
+            white-space: pre-wrap;
+        }
+        textarea {
+            width: 100%;
+            height: 200px;
+            margin-bottom: 10px;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        .agent-list {
+            margin-top: 20px;
+        }
+        .agent-item {
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .roadblock {
+            background-color: #ffdddd;
+        }
+        .completed {
+            background-color: #ddffdd;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Claudevzzz: GitHub Issue Assistant</h1>
+    
+    <div class="panel">
+        <h2>Repository Settings</h2>
+        <input type="text" id="repoInput" placeholder="owner/repo" style="width: 300px;">
+        <button onclick="loadIssues()">Load Issues</button>
+    </div>
+    
+    <div class="container">
+        <div class="panel">
+            <h2>Issues</h2>
+            <div id="issueList" class="issue-list">
+                <!-- Issues will be loaded here -->
+            </div>
+        </div>
+        
+        <div class="panel">
+            <h2>Issue Details</h2>
+            <div id="issueDetails" class="issue-details">
+                <!-- Selected issue details will appear here -->
+            </div>
+            
+            <div id="configPanel" style="display: none; margin-top: 20px;">
+                <h3>Agent Configuration</h3>
+                <select id="configType">
+                    <option value="basic">Basic</option>
+                    <option value="detailed">Detailed</option>
+                    <option value="expert">Expert</option>
+                </select>
+                <button onclick="generateConfig()">Generate Config</button>
+                
+                <textarea id="configEditor"></textarea>
+                
+                <button onclick="launchAgent()">Launch Agent</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="panel">
+        <h2>Active and Completed Agents</h2>
+        <button onclick="refreshAgents()">Refresh</button>
+        <div id="agentList" class="agent-list">
+            <!-- Agents will be listed here -->
+        </div>
+    </div>
+    
+    <script>
+        let currentIssue = null;
+        let currentRepo = '';
+        
+        async function loadIssues() {
+            const repo = document.getElementById('repoInput').value;
+            if (!repo) return;
+            
+            currentRepo = repo;
+            
+            try {
+                const response = await fetch(`/api/issues?repo=${repo}`);
+                const issues = await response.json();
+                
+                const issueList = document.getElementById('issueList');
+                issueList.innerHTML = '';
+                
+                issues.forEach(issue => {
+                    const issueItem = document.createElement('div');
+                    issueItem.className = 'issue-item';
+                    issueItem.textContent = `#${issue.number}: ${issue.title}`;
+                    issueItem.onclick = () => loadIssueDetails(issue.number);
+                    issueList.appendChild(issueItem);
+                });
+            } catch (error) {
+                console.error('Error loading issues:', error);
+                alert('Error loading issues. Make sure the repository exists and you have access to it.');
+            }
+        }
+        
+        async function loadIssueDetails(issueNumber) {
+            try {
+                const response = await fetch(`/api/issues/${issueNumber}?repo=${currentRepo}`);
+                const issue = await response.json();
+                
+                currentIssue = issue;
+                
+                const issueDetails = document.getElementById('issueDetails');
+                issueDetails.innerHTML = `
+                    <h3>#${issue.number}: ${issue.title}</h3>
+                    <p>${issue.body}</p>
+                    <p><strong>Labels:</strong> ${issue.labels.map(l => l.name).join(', ')}</p>
+                `;
+                
+                document.getElementById('configPanel').style.display = 'block';
+            } catch (error) {
+                console.error('Error loading issue details:', error);
+            }
+        }
+        
+        async function generateConfig() {
+            if (!currentIssue) return;
+            
+            const configType = document.getElementById('configType').value;
+            
+            try {
+                const response = await fetch('/api/generate-config', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        issue: currentIssue,
+                        configType
+                    })
+                });
+                
+                const data = await response.json();
+                document.getElementById('configEditor').value = data.config;
+            } catch (error) {
+                console.error('Error generating config:', error);
+            }
+        }
+        
+        async function launchAgent() {
+            if (!currentIssue) return;
+            
+            const config = document.getElementById('configEditor').value;
+            
+            try {
+                const response = await fetch('/api/launch-agent', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        repo: currentRepo,
+                        issue: currentIssue,
+                        config: JSON.parse(config),
+                        agentType: 'claude-code'
+                    })
+                });
+                
+                const data = await response.json();
+                alert(`Agent launched: ${data.message}`);
+                refreshAgents();
+            } catch (error) {
+                console.error('Error launching agent:', error);
+                alert('Error launching agent. Check if the configuration is valid JSON.');
+            }
+        }
+        
+        async function refreshAgents() {
+            try {
+                const response = await fetch('/api/agents');
+                const agents = await response.json();
+                
+                const agentList = document.getElementById('agentList');
+                agentList.innerHTML = '';
+                
+                Object.entries(agents).forEach(([id, agent]) => {
+                    const agentItem = document.createElement('div');
+                    agentItem.className = `agent-item ${agent.status}`;
+                    
+                    let agentHtml = `
+                        <h3>Agent for Issue #${agent.issue}</h3>
+                        <p><strong>Status:</strong> ${agent.status}</p>
+                        <p><strong>Started:</strong> ${new Date(agent.started).toLocaleString()}</p>
+                    `;
+                    
+                    if (agent.pullRequestUrl) {
+                        agentHtml += `<p><strong>Pull Request:</strong> <a href="${agent.pullRequestUrl}" target="_blank">${agent.pullRequestUrl}</a></p>`;
+                    }
+                    
+                    if (agent.roadblock) {
+                        agentHtml += `<p><strong>Roadblock:</strong> ${agent.roadblock}</p>`;
+                    }
+                    
+                    agentItem.innerHTML = agentHtml;
+                    agentList.appendChild(agentItem);
+                });
+            } catch (error) {
+                console.error('Error refreshing agents:', error);
+            }
+        }
+        
+        // Initial refresh
+        refreshAgents();
+    </script>
+</body>
+</html>
