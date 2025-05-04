@@ -21,14 +21,29 @@ RUN wget https://github.com/cli/cli/releases/download/v2.40.1/gh_2.40.1_linux_am
 # Install Claude Code
 RUN npm install -g @anthropic-ai/claude-code
 
+# Install nodemon globally for development
+RUN npm install -g nodemon
+
 # Set up work directory
 WORKDIR /app
 
-# Install Express and other needed packages
-COPY package.json .
+# Copy package files first
+COPY package*.json ./
+
+# Install dependencies
 RUN npm install
 
-# Copy application files
+# Copy Vite, Tailwind config files, and client source files first
+COPY vite.config.js tailwind.config.js postcss.config.js ./
+COPY client ./client/
+
+# Build React client before copying the rest
+RUN echo "Building React client..." && \
+    mkdir -p public/dist && \
+    npm run client:build && \
+    ls -la public/dist
+
+# Copy remaining application files
 COPY . .
 
 # Create data directory for agent workspaces

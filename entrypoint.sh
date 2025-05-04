@@ -82,5 +82,34 @@ else
   echo "All services authenticated, starting web interface..."
   echo "Credential files stored in persistent volume:"
   ls -la /data/.config/gh /data/.config/claude /data/.anthropic 2>/dev/null || echo "No credential files found yet"
-  npm start
+  if [ "$NODE_ENV" = "development" ]; then
+    echo "Starting server in development mode with hot reloading..."
+    echo "Installing dependencies in mounted volume..."
+    npm install
+    
+    # Run Vite in development mode in the background
+    echo "Starting Vite development server..."
+    npm run client:dev &
+    VITE_PID=$!
+    
+    # Wait a moment for Vite to start
+    sleep 3
+    
+    echo "Starting Express server with nodemon..."
+    echo "Everything (UI and API) will be available at: http://localhost:3000"
+    echo "The Express server will proxy frontend requests to the Vite dev server"
+    npx nodemon --watch server.js server.js
+    
+    # Kill the Vite process when the Express server exits
+    kill $VITE_PID
+  else
+    # For production, make sure the React app is properly built
+    if [ ! -f "/app/public/dist/index.html" ]; then
+      echo "⚠️ React app build not found. Building now..."
+      npm run client:build
+    else
+      echo "✅ React app build found. Starting server..."
+    fi
+    npm start
+  fi
 fi

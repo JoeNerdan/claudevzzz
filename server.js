@@ -2,16 +2,50 @@ const express = require('express');
 const { exec, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 const app = express();
 const port = 3000;
 
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static('public'));
+
+// Setup to handle both development and production environments
+if (process.env.NODE_ENV === 'development') {
+    // In development mode, proxy non-API requests to the Vite dev server
+    console.log('Development mode: Proxying front-end requests to Vite dev server');
+    app.use('/', 
+        createProxyMiddleware({
+            target: 'http://localhost:5173',
+            changeOrigin: true,
+            // Don't proxy API requests, those will be handled by Express
+            filter: (pathname) => !pathname.startsWith('/api')
+        })
+    );
+} else {
+    // In production mode, serve static files from the public directory
+    console.log('Production mode: Serving static files');
+    
+    // First serve React app files from the dist directory
+    app.use(express.static(path.join(__dirname, 'public/dist')));
+    
+    // Then serve any other static files from the public directory
+    app.use(express.static('public'));
+}
 
 // Track active agents
 const activeAgents = {};
+
+// API: List user's GitHub repositories
+app.get('/api/repos', (req, res) => {
+    exec('gh repo list --json name,nameWithOwner,url,description,isPrivate,stargazerCount --limit 100', (error, stdout, stderr) => {
+        if (error) {
+            return res.status(500).json({ error: stderr || error.message });
+        }
+        
+        res.json(JSON.parse(stdout));
+    });
+});
 
 // API: List GitHub issues
 app.get('/api/issues', (req, res) => {
@@ -160,7 +194,53 @@ app.get('/api/agents', (req, res) => {
     res.json(activeAgents);
 });
 
+// API: Get agent logs
+app.get('/api/agent/:workspaceId/logs', (req, res) => {
+    const { workspaceId } = req.params;
+    const { type = 'output' } = req.query; // 'output' or 'error'
+    
+    if (!activeAgents[workspaceId]) {
+        return res.status(404).json({ error: 'Agent not found' });
+    }
+    
+    const agentInfo = activeAgents[workspaceId];
+    const logFile = type === 'error' ? 'error.log' : 'output.log';
+    const logPath = path.join(agentInfo.workspace, logFile);
+    
+    try {
+        if (fs.existsSync(logPath)) {
+            const logContent = fs.readFileSync(logPath, 'utf8');
+            res.json({ logs: logContent });
+        } else {
+            res.status(404).json({ error: 'Log file not found' });
+        }
+    } catch (error) {
+        res.status(500).json({ error: `Error reading log file: ${error.message}` });
+    }
+});
+
+// Serve React app for all other routes (SPA routing)
+app.get('*', (req, res, next) => {
+    // Skip API routes
+    if (req.path.startsWith('/api')) return next();
+    
+    // In production mode, serve the React app for all non-API routes
+    if (process.env.NODE_ENV !== 'development') {
+        const indexPath = path.join(__dirname, 'public/dist/index.html');
+        if (fs.existsSync(indexPath)) {
+            res.sendFile(indexPath);
+        } else {
+            console.error('React app not built yet. Index.html not found in public/dist/');
+            res.status(404).send(
+                'React app not built yet. Please rebuild the Docker image with: npm run docker:build'
+            );
+        }
+    }
+    // In development, the proxy middleware will handle non-API routes
+});
+
 // Start the server
 app.listen(port, '0.0.0.0', () => {
     console.log(`Server running at http://0.0.0.0:${port}`);
+    console.log(`Development mode: ${process.env.NODE_ENV === 'development'}`);
 });
