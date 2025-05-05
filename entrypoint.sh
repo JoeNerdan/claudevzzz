@@ -16,17 +16,17 @@ mkdir -p "$HOME/.claude"
 chmod 755 "$HOME" "$HOME/.config" "$HOME/.claude"
 
 # Remove any existing potentially broken links or directories in HOME
-rm -rf "$HOME/.config/gh" "$HOME/.claude"/*
+rm -rf "$HOME/.config/gh" "$HOME/.claude"
 
 # Create symbolic links from standard locations to persistent storage
 # Tools like 'gh' and 'claude' will write to ~/.config/gh and ~/.claude,
 # which will now point to the persistent /data volume.
 ln -sf /data/.config/gh "$HOME/.config/gh"
-# Link individual credential files instead of the whole directory
-mkdir -p /data/.claude/credentials
-cp -rf /data/.claude/* "$HOME/.claude/"
+# IMPORTANT: Link the entire .claude directory, not just contents
+mkdir -p /data/.claude
+ln -sf /data/.claude "$HOME/.claude"
 echo "✅ Linked ~/.config/gh -> /data/.config/gh"
-echo "✅ Copied /data/.claude/* to $HOME/.claude/"
+echo "✅ Linked ~/.claude -> /data/.claude"
 
 # --- Authentication Checks ---
 echo "🔍 Checking authentication:"
@@ -43,18 +43,12 @@ else
 fi
 
 # Check if Claude credentials exist
-if [ -f "$HOME/.claude/credentials.json" ] || [ -d "$HOME/.claude/credentials" ]; then
+# Since HOME/.claude is now a symlink to /data/.claude, we only need to check one location
+if [ -f "/data/.claude/credentials.json" ] || [ -d "/data/.claude/credentials" ]; then
   echo "✅ Claude CLI (found credentials)"
 else
-  # Check if credentials exist in the persistent storage
-  if [ -f "/data/.claude/credentials.json" ] || [ -d "/data/.claude/credentials" ]; then
-    echo "✅ Claude credentials found in persistent storage, copying..."
-    mkdir -p "$HOME/.claude"
-    cp -rf /data/.claude/* "$HOME/.claude/"
-  else
-    echo "❌ Claude CLI needs authentication."
-    CLAUDE_AUTH_NEEDED=true
-  fi
+  echo "❌ Claude CLI needs authentication."
+  CLAUDE_AUTH_NEEDED=true
 fi
 
 # --- Action Based on Auth Status ---
@@ -65,9 +59,10 @@ if [ "$GITHUB_AUTH_NEEDED" = true ] || [ "$CLAUDE_AUTH_NEEDED" = true ]; then
     echo "   - Run: gh auth login"
   fi
   if [ "$CLAUDE_AUTH_NEEDED" = true ]; then
-     echo "   - Run: claude auth login"
-     echo "   - IMPORTANT: After login, copy credentials to persistent storage:"
-     echo "     mkdir -p /data/.claude && cp -r ~/.claude/* /data/.claude/"
+     echo "   - Run: claude"
+     echo "   - IMPORTANT: This will start the login flow if not authenticated"
+     echo "   - Your credentials will automatically be saved to the persistent storage"
+     echo "   - No manual copying needed as ~/.claude is now linked to /data/.claude"
   fi
   echo "   After authenticating, exit this shell and restart the container,"
   echo "   or manually run 'npm start' or 'npm run dev' depending on your mode."
