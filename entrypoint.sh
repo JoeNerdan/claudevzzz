@@ -18,8 +18,8 @@ chmod 755 "$HOME" "$HOME/.config"
 # IMPORTANT: We're completely removing the old files, not just contents
 rm -rf "$HOME/.config/gh" "$HOME/.config/claude" "$HOME/.claude" "$HOME/.claude.json"
 
-# Create home directories first
-mkdir -p "$HOME/.claude" 
+# Make sure the directories are completely removed first
+rm -rf "$HOME/.claude"
 
 # Copy Claude's main configuration file
 if [ -f "/data/.claude.json" ]; then
