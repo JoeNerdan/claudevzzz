@@ -18,8 +18,7 @@ RUN wget https://github.com/cli/cli/releases/download/v2.40.1/gh_2.40.1_linux_am
     mv /tmp/gh_*_linux_amd64/bin/gh /usr/local/bin/ && \
     rm -rf /tmp/gh*
 
-# Install Claude Code
-RUN npm install -g @anthropic-ai/claude-code
+# Claude Code installation removed
 
 # Install nodemon globally for development
 RUN npm install -g nodemon
@@ -46,7 +45,7 @@ RUN echo "Building React client..." && \
 # Copy remaining application files
 COPY . .
 
-# Create data directory for agent workspaces
+# Create data directory for agent workspaces - keeping this for future
 RUN mkdir -p /data/workspaces
 
 # Expose port for web interface
